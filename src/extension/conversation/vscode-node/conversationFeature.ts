@@ -93,22 +93,25 @@ export class ConversationFeature implements IExtensionContribution {
 		if (authenticationService.copilotToken) {
 			this.logService.info(`ConversationFeature: Copilot token already available`);
 			this.activated = true;
+			this.enabled = true;
 			activationBlockerDeferred.complete();
 		} else {
 			markChatExtGlobal(ChatExtGlobalPerfMark.WillWaitForCopilotToken);
-			this.logService.info(`ConversationFeature: Waiting for copilot token to activate conversation feature`);
+			this.logService.info(`ConversationFeature: No copilot token yet, enabling anyway for no-auth mode`);
+			this.activated = true;
+			this.enabled = true;
+			activationBlockerDeferred.complete();
 		}
 
 		this._disposables.add(authenticationService.onDidAuthenticationChange(async () => {
 			const hasSession = !!authenticationService.copilotToken;
 			this.logService.info(`ConversationFeature: onDidAuthenticationChange has token: ${hasSession}`);
-			if (hasSession) {
-				markChatExtGlobal(ChatExtGlobalPerfMark.DidWaitForCopilotToken);
+			if (!this._activated) {
 				this.activated = true;
-			} else {
-				this.activated = false;
 			}
-
+			if (!this._enabled) {
+				this.enabled = true;
+			}
 			activationBlockerDeferred.complete();
 		}));
 	}
@@ -169,12 +172,6 @@ export class ConversationFeature implements IExtensionContribution {
 			return;
 		} else {
 			this._searchProviderRegistered = true;
-
-			// Don't register for no auth user
-			if (this.authenticationService.copilotToken?.isNoAuthUser) {
-				this.logService.debug('ConversationFeature: Skipping search provider registration - no GitHub session available');
-				return;
-			}
 
 			return vscode.workspace.registerAITextSearchProvider('file', this.instantiationService.createInstance(SemanticSearchTextSearchProvider));
 		}

@@ -5,6 +5,7 @@
 
 import * as l10n from '@vscode/l10n';
 import { commands, env, ExtensionContext, ExtensionMode, l10n as vscodeL10n } from 'vscode';
+import { registerGitHubAuthProviderAndForceEntitlement } from '../../../platform/authentication/vscode-node/fakeGitHubAuthProvider';
 import { isScenarioAutomation } from '../../../platform/env/common/envService';
 import { isProduction } from '../../../platform/env/common/packagejson';
 import { IIgnoreService } from '../../../platform/ignore/common/ignoreService';
@@ -14,14 +15,6 @@ import { IInstantiationServiceBuilder, InstantiationServiceBuilder } from '../..
 import { IInstantiationService } from '../../../util/vs/platform/instantiation/common/instantiation';
 import { CopilotExtensionApi } from '../../api/vscode/extensionApi';
 import { ContributionCollection, IExtensionContributionFactory } from '../../common/contributions';
-
-// ##################################################################################
-// ###                                                                            ###
-// ###  Shared extension activation code for both web and node.js extension host. ###
-// ###                                                                            ###
-// ###    !!! Prefer to add code in HERE to support all extension runtimes !!!    ###
-// ###                                                                            ###
-// ##################################################################################
 
 export interface IExtensionActivationConfiguration {
 	context: ExtensionContext;
@@ -34,6 +27,9 @@ export interface IExtensionActivationConfiguration {
 export async function baseActivate(configuration: IExtensionActivationConfiguration) {
 	markChatExtGlobal(ChatExtGlobalPerfMark.WillActivate);
 	const context = configuration.context;
+
+	await registerGitHubAuthProviderAndForceEntitlement(context);
+
 	if (context.extensionMode === ExtensionMode.Test && !configuration.forceActivation && !isScenarioAutomation) {
 		// FIXME Running in tests, don't activate the extension
 		// Avoid bundling the extension code in the test bundle

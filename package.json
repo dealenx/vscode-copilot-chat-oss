@@ -2,7 +2,7 @@
 	"name": "copilot-chat",
 	"displayName": "GitHub Copilot Chat",
 	"description": "AI chat features powered by Copilot",
-	"version": "0.44.0",
+	"version": "0.44.9",
 	"build": "1",
 	"internalAIKey": "1058ec22-3c95-4951-8443-f26c1f325911",
 	"completionsCoreVersion": "1.378.1799",
@@ -5842,7 +5842,7 @@
 						"id": "copilot.setup.signIn",
 						"title": "%github.copilot.walkthrough.setup.signIn.title%",
 						"description": "%github.copilot.walkthrough.setup.signIn.description%",
-						"when": "chatEntitlementSignedOut && !view.workbench.panel.chat.view.copilot.visible && !github.copilot-chat.activated && !github.copilot.offline && !github.copilot.interactiveSession.individual.disabled && !github.copilot.interactiveSession.individual.expired && !github.copilot.interactiveSession.enterprise.disabled && !github.copilot.interactiveSession.contactSupport && !github.copilot.interactiveSession.invalidToken && !github.copilot.interactiveSession.rateLimited && !github.copilot.interactiveSession.gitHubLoginFailed",
+						"when": "true",
 						"media": {
 							"video": {
 								"dark": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/workspace.mp4",
@@ -5857,7 +5857,7 @@
 						"id": "copilot.setup.signInNoAction",
 						"title": "%github.copilot.walkthrough.setup.signIn.title%",
 						"description": "%github.copilot.walkthrough.setup.noAction.description%",
-						"when": "chatEntitlementSignedOut && view.workbench.panel.chat.view.copilot.visible && !github.copilot-chat.activated && !github.copilot.offline && !github.copilot.interactiveSession.individual.disabled && !github.copilot.interactiveSession.individual.expired && !github.copilot.interactiveSession.enterprise.disabled && !github.copilot.interactiveSession.contactSupport && !github.copilot.interactiveSession.invalidToken && !github.copilot.interactiveSession.rateLimited && !github.copilot.interactiveSession.gitHubLoginFailed",
+						"when": "true",
 						"media": {
 							"video": {
 								"dark": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/workspace.mp4",
@@ -5902,7 +5902,7 @@
 						"id": "copilot.panelChat",
 						"title": "%github.copilot.walkthrough.panelChat.title%",
 						"description": "%github.copilot.walkthrough.panelChat.description%",
-						"when": "!chatEntitlementSignedOut || chatIsEnabled ",
+						"when": "true ",
 						"media": {
 							"video": {
 								"dark": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/workspace.mp4",
@@ -5917,7 +5917,7 @@
 						"id": "copilot.edits",
 						"title": "%github.copilot.walkthrough.edits.title%",
 						"description": "%github.copilot.walkthrough.edits.description%",
-						"when": "!chatEntitlementSignedOut || chatIsEnabled ",
+						"when": "true ",
 						"media": {
 							"video": {
 								"dark": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/edits.mp4",
@@ -5932,7 +5932,7 @@
 						"id": "copilot.firstSuggest",
 						"title": "%github.copilot.walkthrough.firstSuggest.title%",
 						"description": "%github.copilot.walkthrough.firstSuggest.description%",
-						"when": "!chatEntitlementSignedOut || chatIsEnabled ",
+						"when": "true ",
 						"media": {
 							"video": {
 								"dark": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/ghost-text.mp4",
@@ -5947,7 +5947,7 @@
 						"id": "copilot.inlineChatNotMac",
 						"title": "%github.copilot.walkthrough.inlineChatNotMac.title%",
 						"description": "%github.copilot.walkthrough.inlineChatNotMac.description%",
-						"when": "!isMac && (!chatEntitlementSignedOut || chatIsEnabled )",
+						"when": "!isMac && (true )",
 						"media": {
 							"video": {
 								"dark": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/inline.mp4",
@@ -5962,7 +5962,7 @@
 						"id": "copilot.inlineChatMac",
 						"title": "%github.copilot.walkthrough.inlineChatMac.title%",
 						"description": "%github.copilot.walkthrough.inlineChatMac.description%",
-						"when": "isMac && (!chatEntitlementSignedOut || chatIsEnabled )",
+						"when": "isMac && (true )",
 						"media": {
 							"video": {
 								"dark": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/inline.mp4",
@@ -5977,7 +5977,7 @@
 						"id": "copilot.sparkle",
 						"title": "%github.copilot.walkthrough.sparkle.title%",
 						"description": "%github.copilot.walkthrough.sparkle.description%",
-						"when": "!chatEntitlementSignedOut || chatIsEnabled",
+						"when": "true",
 						"media": {
 							"video": {
 								"dark": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/git-commit.mp4",

@@ -4,17 +4,12 @@
  *--------------------------------------------------------------------------------------------*/
 import { commands, extensions, window } from 'vscode';
 import { IAuthenticationService, MinimalModeError } from '../../../platform/authentication/common/authentication';
-import { ContactSupportError, EnterpriseManagedError, GitHubLoginFailedError, InvalidTokenError, NotSignedUpError, RateLimitedError, SubscriptionExpiredError } from '../../../platform/authentication/vscode-node/copilotTokenManager';
-import { SESSION_LOGIN_MESSAGE } from '../../../platform/authentication/vscode-node/session';
 import { ConfigKey, IConfigurationService } from '../../../platform/configuration/common/configurationService';
 import { IEnvService } from '../../../platform/env/common/envService';
 import { ILogService } from '../../../platform/log/common/logService';
-import { ITelemetryService } from '../../../platform/telemetry/common/telemetry';
-import { TelemetryData } from '../../../platform/telemetry/common/telemetryData';
 import { Disposable } from '../../../util/vs/base/common/lifecycle';
 import { autorun } from '../../../util/vs/base/common/observableInternal';
 import { GHPR_EXTENSION_ID } from '../../chatSessions/vscode/chatSessionsUriHandler';
-import { EXTENSION_ID } from '../../common/constants';
 
 const welcomeViewContextKeys = {
 	Activated: 'github.copilot-chat.activated',
@@ -43,14 +38,10 @@ export const prExtensionInstalledContextKey = 'github.copilot.prExtensionInstall
 
 export class ContextKeysContribution extends Disposable {
 
-	private _needsOfflineCheck = false;
-	private _scheduledOfflineCheck: TimeoutHandle | undefined;
 	private _showLogView = false;
-	private _lastContextKey: string | undefined;
 
 	constructor(
 		@IAuthenticationService private readonly _authenticationService: IAuthenticationService,
-		@ITelemetryService private readonly _telemetryService: ITelemetryService,
 		@ILogService private readonly _logService: ILogService,
 		@IConfigurationService private readonly _configService: IConfigurationService,
 		@IEnvService private readonly _envService: IEnvService
@@ -66,7 +57,6 @@ export class ContextKeysContribution extends Disposable {
 			await commands.executeCommand('setContext', showLogViewContextKey, true);
 			await commands.executeCommand('copilot-chat.focus');
 		}));
-		this._register({ dispose: () => this._cancelPendingOfflineCheck() });
 		this._register(window.onDidChangeWindowState(() => this._runOfflineCheck('Window state change')));
 
 		this._updateShowLogViewContext();
@@ -84,90 +74,18 @@ export class ContextKeysContribution extends Disposable {
 		}));
 	}
 
-	private _scheduleOfflineCheck() {
-		this._cancelPendingOfflineCheck();
-		this._needsOfflineCheck = true;
-		this._logService.debug(`[context keys] Scheduling offline check. Active: ${window.state.active}, focused: ${window.state.focused}.`);
-		if (window.state.active && window.state.focused) {
-			const delayInSeconds = 60;
-			this._scheduledOfflineCheck = setTimeout(() => {
-				this._scheduledOfflineCheck = undefined;
-				this._runOfflineCheck('Scheduled offline check');
-			}, delayInSeconds * 1000);
-		}
-	}
-
 	private _runOfflineCheck(trigger: string) {
-		this._logService.debug(`[context keys] ${trigger}. Needs offline check: ${this._needsOfflineCheck}, active: ${window.state.active}, focused: ${window.state.focused}.`);
-		if (this._needsOfflineCheck && window.state.active && window.state.focused) {
-			this._inspectContext()
-				.catch(err => this._logService.error(err));
-		}
-	}
-
-	private _cancelPendingOfflineCheck() {
-		this._needsOfflineCheck = false;
-		if (this._scheduledOfflineCheck) {
-			clearTimeout(this._scheduledOfflineCheck);
-			this._scheduledOfflineCheck = undefined;
-		}
+		this._logService.debug(`[context keys] ${trigger}. Running offline check.`);
+		this._inspectContext()
+			.catch(err => this._logService.error(err));
 	}
 
 	private async _inspectContext() {
-		this._logService.debug(`[context keys] Updating context keys.`);
-		this._cancelPendingOfflineCheck();
-		const allKeys = Object.values(welcomeViewContextKeys);
-		let error: unknown | undefined = undefined;
-		let key: string | undefined;
-		try {
-			await this._authenticationService.getCopilotToken();
-			key = welcomeViewContextKeys.Activated;
-		} catch (e: any) {
-			error = e;
-			const reason = e.message || e;
-			const data = TelemetryData.createAndMarkAsIssued({ reason });
-			this._telemetryService.sendGHTelemetryErrorEvent('activationFailed', data.properties, data.measurements);
-			const message =
-				reason === 'GitHubLoginFailed'
-					? SESSION_LOGIN_MESSAGE
-					: `GitHub Copilot could not connect to server. Extension activation failed: "${reason}"`;
-			this._logService.error(message);
-		}
+		this._logService.debug(`[context keys] Updating context keys (no-auth mode: always activated).`);
 
-		if (error instanceof NotSignedUpError) {
-			key = welcomeViewContextKeys.IndividualDisabled;
-		} else if (error instanceof SubscriptionExpiredError) {
-			key = welcomeViewContextKeys.IndividualExpired;
-		} else if (error instanceof EnterpriseManagedError) {
-			key = welcomeViewContextKeys.EnterpriseDisabled;
-		} else if (error instanceof ContactSupportError) {
-			key = welcomeViewContextKeys.ContactSupport;
-		} else if (error instanceof InvalidTokenError) {
-			key = welcomeViewContextKeys.InvalidToken;
-		} else if (error instanceof GitHubLoginFailedError) {
-			key = welcomeViewContextKeys.GitHubLoginFailed;
-		} else if (error) {
-			if (!extensions.getExtension(EXTENSION_ID)?.isActive) {
-				if (error instanceof RateLimitedError) {
-					key = welcomeViewContextKeys.RateLimited;
-				} else {
-					key = welcomeViewContextKeys.Offline;
-				}
-			}
-			this._scheduleOfflineCheck();
-		}
-
-		if (key) {
-			if (key !== this._lastContextKey) {
-				this._logService.info(`[context keys] Setting context key: ${key}`);
-				this._lastContextKey = key;
-			}
-			commands.executeCommand('setContext', key, true);
-		}
-
-		// Unset all other context keys
-		for (const contextKey of allKeys) {
-			if (contextKey !== key) {
+		commands.executeCommand('setContext', welcomeViewContextKeys.Activated, true);
+		for (const contextKey of Object.values(welcomeViewContextKeys)) {
+			if (contextKey !== welcomeViewContextKeys.Activated) {
 				commands.executeCommand('setContext', contextKey, false);
 			}
 		}

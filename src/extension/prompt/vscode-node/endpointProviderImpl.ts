@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import * as vscode from 'vscode';
 import { LanguageModelChat, type ChatRequest } from 'vscode';
 import { IAuthenticationService } from '../../../platform/authentication/common/authentication';
 import { IConfigurationService } from '../../../platform/configuration/common/configurationService';
@@ -66,8 +67,22 @@ export class ProductionEndpointProvider extends Disposable implements IEndpointP
 		this._logService.trace(`Resolving chat model`);
 
 		if (typeof requestOrFamilyOrModel === 'string') {
-			const modelMetadata = await this._modelFetcher.getChatModelFromFamily(requestOrFamilyOrModel);
-			return this.getOrCreateChatEndpointInstance(modelMetadata!);
+			try {
+				const modelMetadata = await this._modelFetcher.getChatModelFromFamily(requestOrFamilyOrModel);
+				return this.getOrCreateChatEndpointInstance(modelMetadata!);
+			} catch {
+				const allEndpoints = await this.getAllChatEndpoints();
+				if (allEndpoints.length > 0) {
+					this._logService.info(`[NoAuth] Falling back to first available endpoint for family: ${requestOrFamilyOrModel}`);
+					return allEndpoints[0];
+				}
+				const byokModel = await this._findFirstByokModel();
+				if (byokModel) {
+					this._logService.info(`[NoAuth] Falling back to BYOK model: ${byokModel.id}`);
+					return this._instantiationService.createInstance(ExtensionContributedChatEndpoint, byokModel);
+				}
+				throw new Error(`No chat endpoints available and copilot-base model could not be resolved`);
+			}
 		}
 
 		const model = 'model' in requestOrFamilyOrModel ? requestOrFamilyOrModel.model : requestOrFamilyOrModel;
@@ -90,8 +105,32 @@ export class ProductionEndpointProvider extends Disposable implements IEndpointP
 		}
 
 		const modelMetadata = await this._modelFetcher.getChatModelFromApiModel(model);
-		// If we fail to resolve a model since this is panel we give copilot base. This really should never happen as the picker is powered by the same service.
-		return modelMetadata ? this.getOrCreateChatEndpointInstance(modelMetadata) : this.getChatEndpoint('copilot-base');
+		if (modelMetadata) {
+			return this.getOrCreateChatEndpointInstance(modelMetadata);
+		}
+		try {
+			return this.getChatEndpoint('copilot-base');
+		} catch {
+			const allEndpoints = await this.getAllChatEndpoints();
+			if (allEndpoints.length > 0) {
+				this._logService.info(`[NoAuth] Falling back to first available endpoint for model: ${model.id}`);
+				return allEndpoints[0];
+			}
+			throw new Error(`Unable to resolve chat model: ${model.id},${model.name},${model.version},${model.family}`);
+		}
+	}
+
+	private async _findFirstByokModel(): Promise<LanguageModelChat | undefined> {
+		try {
+			const models = await vscode.lm.selectChatModels({});
+			for (const model of models) {
+				if (model.vendor !== 'copilot') {
+					return model;
+				}
+			}
+		} catch {
+		}
+		return undefined;
 	}
 
 	async getEmbeddingsEndpoint(family?: EmbeddingsEndpointFamily): Promise<IEmbeddingsEndpoint> {
