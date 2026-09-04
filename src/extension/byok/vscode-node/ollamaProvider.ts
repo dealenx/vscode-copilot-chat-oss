@@ -9,9 +9,10 @@ import { IFetcherService } from '../../../platform/networking/common/fetcherServ
 import { IExperimentationService } from '../../../platform/telemetry/common/nullExperimentationService';
 import { ErrorUtils } from '../../../util/common/errors';
 import { IInstantiationService } from '../../../util/vs/platform/instantiation/common/instantiation';
-import { byokKnownModelsToAPIInfo, resolveModelInfo } from '../common/byokProvider';
+import { resolveModelInfo } from '../common/byokProvider';
 import { OpenAIEndpoint } from '../node/openAIEndpoint';
 import { AbstractOpenAICompatibleLMProvider, LanguageModelChatConfiguration, OpenAICompatibleLanguageModelChatInformation } from './abstractLanguageModelChatProvider';
+import { byokKnownModelsToAPIInfoWithEffort } from './byokModelInfo';
 import { IBYOKStorageService } from './byokStorageService';
 
 interface OllamaModelInfoAPIResponse {
@@ -38,7 +39,10 @@ export interface OllamaConfig extends LanguageModelChatConfiguration {
 }
 
 export class OllamaLMProvider extends AbstractOpenAICompatibleLMProvider<OllamaConfig> {
+
 	public static readonly providerName = 'Ollama';
+	public static readonly providerId = this.providerName.toLowerCase();
+
 	private _modelCache = new Map<string, IChatModelInformation>();
 
 	constructor(
@@ -50,7 +54,7 @@ export class OllamaLMProvider extends AbstractOpenAICompatibleLMProvider<OllamaC
 		@IExperimentationService expService: IExperimentationService
 	) {
 		super(
-			OllamaLMProvider.providerName.toLowerCase(),
+			OllamaLMProvider.providerId,
 			OllamaLMProvider.providerName,
 			undefined,
 			byokStorageService,
@@ -86,19 +90,19 @@ export class OllamaLMProvider extends AbstractOpenAICompatibleLMProvider<OllamaC
 		}
 
 		const ollamaBaseUrl = config.url;
-		const headers: Record<string, string> = apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {};
 
 		try {
-			await this._checkOllamaVersion(ollamaBaseUrl, headers);
+			// Check Ollama server version before proceeding with model operations
+			await this._checkOllamaVersion(ollamaBaseUrl);
 
-			const response = await this._fetcherService.fetch(`${ollamaBaseUrl}/api/tags`, { method: 'GET', callSite: 'ollama-tags', headers });
+			const response = await this._fetcherService.fetch(`${ollamaBaseUrl}/api/tags`, { method: 'GET', callSite: 'ollama-tags' });
 			const models = (await response.json()).models;
 			this._knownModels = {};
 			for (const model of models) {
 				let modelInfo = this._modelCache.get(`${ollamaBaseUrl}/${model.model}`);
 				if (!modelInfo) {
-				try {
-					modelInfo = await this._getOllamaModelInfo(ollamaBaseUrl, model.model, headers);
+					try {
+						modelInfo = await this._getOllamaModelInfo(ollamaBaseUrl, model.model);
 					} catch (e) {
 						const error = ErrorUtils.fromUnknown(e);
 						this._logService.error(error, 'ollamaProvider: failed to fetch Ollama model info');
@@ -116,7 +120,7 @@ export class OllamaLMProvider extends AbstractOpenAICompatibleLMProvider<OllamaC
 				};
 			}
 
-			return byokKnownModelsToAPIInfo(this._name, this._knownModels).map(model => ({
+			return byokKnownModelsToAPIInfoWithEffort(this._name, this._knownModels).map(model => ({
 				...model,
 				url: ollamaBaseUrl
 			}));
@@ -140,8 +144,8 @@ export class OllamaLMProvider extends AbstractOpenAICompatibleLMProvider<OllamaC
 		return this._instantiationService.createInstance(OpenAIEndpoint, modelInfo, model.configuration?.apiKey ?? '', url);
 	}
 
-	private async _getOllamaModelInfo(ollamaBaseUrl: string, modelId: string, headers: Record<string, string> = {}): Promise<IChatModelInformation> {
-		const modelInfo = await this._fetchOllamaModelInformation(ollamaBaseUrl, modelId, headers);
+	private async _getOllamaModelInfo(ollamaBaseUrl: string, modelId: string): Promise<IChatModelInformation> {
+		const modelInfo = await this._fetchOllamaModelInformation(ollamaBaseUrl, modelId);
 		const contextWindow = modelInfo?.model_info?.[`${modelInfo.model_info['general.architecture']}.context_length`] ?? 32768;
 		const outputTokens = contextWindow < 4096 ? Math.floor(contextWindow / 2) : 4096;
 		const modelCapabilities = {
@@ -185,11 +189,13 @@ export class OllamaLMProvider extends AbstractOpenAICompatibleLMProvider<OllamaC
 		return true; // versions are equal
 	}
 
-	private async _fetchOllamaModelInformation(ollamaBaseUrl: string, modelId: string, headers: Record<string, string> = {}): Promise<OllamaModelInfoAPIResponse> {
+	private async _fetchOllamaModelInformation(ollamaBaseUrl: string, modelId: string): Promise<OllamaModelInfoAPIResponse> {
 		const response = await this._fetcherService.fetch(`${ollamaBaseUrl}/api/show`, {
 			method: 'POST',
 			callSite: 'ollama-show',
-			headers: { 'Content-Type': 'application/json', ...headers },
+			headers: {
+				'Content-Type': 'application/json'
+			},
 			body: JSON.stringify({ model: modelId })
 		});
 		return response.json() as unknown as OllamaModelInfoAPIResponse;
@@ -198,9 +204,9 @@ export class OllamaLMProvider extends AbstractOpenAICompatibleLMProvider<OllamaC
 	 * Check if the connected Ollama server version meets the minimum requirements
 	 * @throws Error if version is below minimum or version check fails
 	 */
-	private async _checkOllamaVersion(ollamaBaseUrl: string, headers: Record<string, string> = {}): Promise<void> {
+	private async _checkOllamaVersion(ollamaBaseUrl: string): Promise<void> {
 		try {
-			const response = await this._fetcherService.fetch(`${ollamaBaseUrl}/api/version`, { method: 'GET', callSite: 'ollama-version', headers });
+			const response = await this._fetcherService.fetch(`${ollamaBaseUrl}/api/version`, { method: 'GET', callSite: 'ollama-version' });
 			const versionInfo = await response.json() as OllamaVersionResponse;
 
 			if (!this._isVersionSupported(versionInfo.version)) {

@@ -60,30 +60,170 @@ const treeSitterGrammars: ITreeSitterGrammar[] = [
 ];
 
 const REPO_ROOT = path.join(__dirname, '..');
+const COPILOT_PACKAGE_DIR = path.join(REPO_ROOT, 'node_modules', '@github', 'copilot');
+const COPILOT_CLI_TOP_LEVEL_DIRS = [
+	'worker',
+	'definitions',
+	'builtin-skills',
+	'builtin',
+	'tgrep',
+	'queries',
+	'prebuilds',
+	'ripgrep',
+	'foundry-local-sdk',
+	'pvrecorder',
+	'mxc-bin',
+	'clipboard',
+	'copilot-sdk',
+	'schemas',
+	'preloads',
+];
 
-/**
- * @github/copilot/sdk/index.js depends on @github/copilot/worker/*.js files.
- * We need to copy these files into the sdk directory to ensure they are available at runtime.
- */
-async function copyCopilotCliWorkerFiles() {
-	const sourceDir = path.join(REPO_ROOT, 'node_modules', '@github', 'copilot', 'worker');
-	const targetDir = path.join(REPO_ROOT, 'node_modules', '@github', 'copilot', 'sdk', 'worker');
+interface ICopilotPackageJson {
+	exports?: Record<string, unknown>;
+}
+
+function isLinuxMuslRuntime(): boolean {
+	if (process.platform !== 'linux') {
+		return false;
+	}
+
+	const report = process.report?.getReport() as { header?: { glibcVersionRuntime?: string } } | undefined;
+	return !report?.header?.glibcVersionRuntime;
+}
+
+function getCopilotPlatformPackageCandidates(): string[] {
+	const arch = process.arch;
+
+	if (process.platform === 'linux') {
+		const linuxCandidates = [`linux-${arch}`, `linuxmusl-${arch}`];
+		return isLinuxMuslRuntime() ? linuxCandidates.reverse() : linuxCandidates;
+	}
+
+	return [`${process.platform}-${arch}`];
+}
+
+async function resolveCopilotCliSourceDir(): Promise<string> {
+	const tried: string[] = [];
+	for (const platformPackage of getCopilotPlatformPackageCandidates()) {
+		const sourceDir = path.join(REPO_ROOT, 'node_modules', '@github', `copilot-${platformPackage}`);
+		tried.push(sourceDir);
+		if (fs.existsSync(path.join(sourceDir, 'sdk', 'index.js'))) {
+			return sourceDir;
+		}
+	}
+
+	if (fs.existsSync(path.join(COPILOT_PACKAGE_DIR, 'sdk', 'index.js'))) {
+		return COPILOT_PACKAGE_DIR;
+	}
+
+	throw new Error(`Could not find @github/copilot SDK files. Tried: ${[COPILOT_PACKAGE_DIR, ...tried].join(', ')}`);
+}
+
+async function ensureCopilotSdkExport() {
+	const packageJsonPath = path.join(COPILOT_PACKAGE_DIR, 'package.json');
+	const packageJson = JSON.parse(await fs.promises.readFile(packageJsonPath, 'utf8')) as ICopilotPackageJson;
+	packageJson.exports = {
+		...(packageJson.exports ?? {}),
+		'./sdk': {
+			types: './sdk/index.d.ts',
+			import: './sdk/index.js'
+		}
+	};
+
+	await fs.promises.writeFile(packageJsonPath, `${JSON.stringify(packageJson, undefined, 2)}\n`);
+}
+
+async function materializeCopilotCliSdkLayout(): Promise<string> {
+	const sourceDir = await resolveCopilotCliSourceDir();
+
+	if (sourceDir !== COPILOT_PACKAGE_DIR) {
+		await copyCopilotCLIFolders(path.join(sourceDir, 'sdk'), path.join(COPILOT_PACKAGE_DIR, 'sdk'));
+		for (const dir of COPILOT_CLI_TOP_LEVEL_DIRS) {
+			const sourcePath = path.join(sourceDir, dir);
+			if (fs.existsSync(sourcePath)) {
+				await copyCopilotCLIFolders(sourcePath, path.join(COPILOT_PACKAGE_DIR, dir));
+			}
+		}
+
+		for (const entry of await fs.promises.readdir(sourceDir)) {
+			if (entry.startsWith('tree-sitter') && entry.endsWith('.wasm')) {
+				await fs.promises.copyFile(path.join(sourceDir, entry), path.join(COPILOT_PACKAGE_DIR, entry));
+			}
+		}
+	}
+
+	await ensureCopilotSdkExport();
+	return sourceDir;
+}
+
+async function removeCopilotCLIShim() {
+	const shimsPath = path.join(COPILOT_PACKAGE_DIR, 'shims.txt');
+	await fs.promises.rm(shimsPath, { force: true }).catch(() => { /* ignore */ });
+}
+
+async function removeCopilotCliWorkerFiles() {
+	const targetDir = path.join(COPILOT_PACKAGE_DIR, 'sdk', 'worker');
+	await fs.promises.rm(targetDir, { recursive: true, force: true });
+}
+
+async function copyCopilotCliTGrepFiles(copilotCliSourceDir: string) {
+	const sourceDir = path.join(copilotCliSourceDir, 'tgrep');
+	const targetDir = path.join(COPILOT_PACKAGE_DIR, 'sdk', 'tgrep');
 
 	await copyCopilotCLIFolders(sourceDir, targetDir);
 }
 
-async function copyCopilotCliSharpFiles() {
-	const sourceDir = path.join(REPO_ROOT, 'node_modules', '@github', 'copilot', 'sharp');
-	const targetDir = path.join(REPO_ROOT, 'node_modules', '@github', 'copilot', 'sdk', 'sharp');
+async function copyCopilotCliDefinitionFiles(copilotCliSourceDir: string) {
+	const sourceDir = path.join(copilotCliSourceDir, 'definitions');
+	const targetDir = path.join(COPILOT_PACKAGE_DIR, 'sdk', 'definitions');
 
 	await copyCopilotCLIFolders(sourceDir, targetDir);
 }
 
-async function copyCopilotCliDefinitionFiles() {
-	const sourceDir = path.join(REPO_ROOT, 'node_modules', '@github', 'copilot', 'definitions');
-	const targetDir = path.join(REPO_ROOT, 'node_modules', '@github', 'copilot', 'sdk', 'definitions');
+async function copyCopilotCliSkillsFiles(copilotCliSourceDir: string) {
+	const sourceDir = path.join(copilotCliSourceDir, 'builtin-skills');
+	const targetDir = path.join(COPILOT_PACKAGE_DIR, 'sdk', 'builtin-skills');
 
 	await copyCopilotCLIFolders(sourceDir, targetDir);
+}
+
+async function copyCopilotCliQueryFiles(copilotCliSourceDir: string) {
+	const sourceDir = path.join(copilotCliSourceDir, 'queries');
+	const targetDir = path.join(COPILOT_PACKAGE_DIR, 'sdk', 'queries');
+
+	await copyCopilotCLIFolders(sourceDir, targetDir);
+}
+
+async function copyCopilotCliPrebuildFiles(copilotCliSourceDir: string) {
+	const sourceDir = path.join(copilotCliSourceDir, 'prebuilds');
+	const targetDir = path.join(COPILOT_PACKAGE_DIR, 'sdk', 'prebuilds');
+	await fs.promises.rm(targetDir, { recursive: true, force: true });
+	await fs.promises.mkdir(targetDir, { recursive: true });
+	await fs.promises.cp(sourceDir, targetDir, {
+		recursive: true, force: true, filter: (src) => {
+			try {
+				if (fs.statSync(src).isFile()) {
+					const normalizedSrc = src.split(path.sep).join(path.posix.sep);
+					return src.endsWith('computer.node')
+						|| src.endsWith('runtime.node')
+						|| src.endsWith('cli-native.node')
+						// node-pty natives: pty.node (+ spawn-helper) on Unix,
+						// conpty.node and its companions on Windows. `endsWith('pty.node')`
+						// also matches `conpty.node`. The conpty native additionally needs
+						// conpty_console_list.node and the conpty/ helpers (OpenConsole.exe,
+						// conpty.dll) to actually spawn. The *.pdb debug symbols are skipped.
+						|| src.endsWith('pty.node')
+						|| src.endsWith('conpty_console_list.node')
+						|| src.endsWith('spawn-helper')
+						|| normalizedSrc.includes('/conpty/');
+				}
+				return true;
+			} catch {
+				return true;
+			}
+		}
+	});
 }
 
 async function copyCopilotCLIFolders(sourceDir: string, targetDir: string) {
@@ -138,19 +278,21 @@ async function main() {
 		'node_modules/@github/blackbird-external-ingest-utils/pkg/nodejs/external_ingest_utils_bg.wasm',
 	], 'dist');
 
-	await copyCopilotCliWorkerFiles();
-	await copyCopilotCliSharpFiles();
-	await copyCopilotCliDefinitionFiles();
+	const copilotCliSourceDir = await materializeCopilotCliSdkLayout();
+	await removeCopilotCLIShim();
+	await removeCopilotCliWorkerFiles();
+	await copyCopilotCliDefinitionFiles(copilotCliSourceDir);
+	await copyCopilotCliSkillsFiles(copilotCliSourceDir);
+	await copyCopilotCliTGrepFiles(copilotCliSourceDir);
+	await copyCopilotCliQueryFiles(copilotCliSourceDir);
+	await copyCopilotCliPrebuildFiles(copilotCliSourceDir);
 
-	// Check if the base cache file exists
+	// Check if the base cache file exists (dev-only sanity check, non-fatal in CI)
 	const baseCachePath = path.join('test', 'simulation', 'cache', 'base.sqlite');
 	if (!fs.existsSync(baseCachePath)) {
-		throw new Error(`Base cache file does not exist at ${baseCachePath}. Please ensure that you have git lfs installed and initialized before the repository is cloned.`);
+		console.warn(`Warning: Base cache file does not exist at ${baseCachePath}. Please ensure that you have git lfs installed and initialized before the repository is cloned.`);
 	}
 
-	await copyStaticAssets([
-		`node_modules/@anthropic-ai/claude-agent-sdk/cli.js`,
-	], 'dist');
 }
 
 main();

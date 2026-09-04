@@ -24,7 +24,7 @@ import { IFileSystemService } from '../../filesystem/common/fileSystemService';
 import { ILogService } from '../../log/common/logService';
 import { IPromptPathRepresentationService } from '../../prompts/common/promptPathRepresentationService';
 import { IWorkspaceService } from '../../workspace/common/workspaceService';
-import { COPILOT_INSTRUCTIONS_PATH, INSTRUCTION_FILE_EXTENSION, INSTRUCTIONS_LOCATION_KEY, PERSONAL_SKILL_FOLDERS, PromptsType, SKILLS_LOCATION_KEY, USE_AGENT_SKILLS_SETTING, WORKSPACE_SKILL_FOLDERS } from './promptTypes';
+import { COPILOT_INSTRUCTIONS_PATH, COPILOT_PERSONAL_INSTRUCTIONS_PATH, INSTRUCTION_FILE_EXTENSION, INSTRUCTIONS_LOCATION_KEY, PERSONAL_SKILL_FOLDERS, PromptsType, SKILLS_LOCATION_KEY, USE_AGENT_SKILLS_SETTING, WORKSPACE_SKILL_FOLDERS } from './promptTypes';
 
 declare const TextDecoder: {
 	decode(input: Uint8Array): string;
@@ -317,6 +317,14 @@ export class CustomInstructionsService extends Disposable implements ICustomInst
 					// ignore non-existing instruction files
 				}
 			}
+			try {
+				const uri = extUriBiasedIgnorePathCase.joinPath(this.envService.userHome, COPILOT_PERSONAL_INSTRUCTIONS_PATH);
+				if ((await this.fileSystemService.stat(uri)).type === FileType.File) {
+					result.push(uri);
+				}
+			} catch (e) {
+				// ignore non-existing instruction files
+			}
 		}
 		return result;
 	}
@@ -439,9 +447,6 @@ export class CustomInstructionsService extends Disposable implements ICustomInst
 	}
 
 	public async isExternalInstructionsFile(uri: URI): Promise<boolean> {
-		if (uri.scheme === 'vscode-chat-internal') {
-			return true;
-		}
 		if (uri.scheme === Schemas.vscodeUserData && uri.path.endsWith(INSTRUCTION_FILE_EXTENSION)) {
 			return true;
 		}
@@ -465,8 +470,7 @@ export class CustomInstructionsService extends Disposable implements ICustomInst
 	}
 
 	public isSkillFile(uri: URI): boolean {
-		return this._matchInstructionLocationsFromSkills.get()(uri) !== undefined
-			|| this.getChatInternalSkillInfo(uri) !== undefined;
+		return this._matchInstructionLocationsFromSkills.get()(uri) !== undefined;
 	}
 
 	public isSkillMdFile(uri: URI): boolean {
@@ -474,7 +478,7 @@ export class CustomInstructionsService extends Disposable implements ICustomInst
 	}
 
 	public getSkillDirectory(uri: URI): URI | undefined {
-		const skillInfo = this._matchInstructionLocationsFromSkills.get()(uri) || this.getChatInternalSkillInfo(uri);
+		const skillInfo = this._matchInstructionLocationsFromSkills.get()(uri);
 		if (!skillInfo) {
 			return undefined;
 		}
@@ -482,7 +486,7 @@ export class CustomInstructionsService extends Disposable implements ICustomInst
 	}
 
 	public getSkillName(uri: URI): string | undefined {
-		const skillInfo = this._matchInstructionLocationsFromSkills.get()(uri) || this.getChatInternalSkillInfo(uri);
+		const skillInfo = this._matchInstructionLocationsFromSkills.get()(uri);
 		if (!skillInfo) {
 			return undefined;
 		}
@@ -490,19 +494,7 @@ export class CustomInstructionsService extends Disposable implements ICustomInst
 	}
 
 	public getSkillInfo(uri: URI): ISkillInfo | undefined {
-		return this._matchInstructionLocationsFromSkills.get()(uri) || this.getChatInternalSkillInfo(uri);
-	}
-
-	private getChatInternalSkillInfo(uri: URI): ISkillInfo | undefined {
-		if (uri.scheme !== 'vscode-chat-internal') {
-			return undefined;
-		}
-		if (extUriBiasedIgnorePathCase.basename(uri).toLowerCase() !== 'skill.md') {
-			return undefined;
-		}
-		const skillFolderUri = extUriBiasedIgnorePathCase.dirname(uri);
-		const skillName = extUriBiasedIgnorePathCase.basename(skillFolderUri);
-		return { skillName, skillFolderUri, storage: SkillStorage.Internal };
+		return this._matchInstructionLocationsFromSkills.get()(uri);
 	}
 }
 
@@ -577,7 +569,7 @@ class InstructionIndexFile implements IInstructionIndexFile {
 
 	get agents(): Set<string> {
 		if (this.agentNames === undefined) {
-			this.agentNames = new Set(this.getValuesInIndexFile('agents', 'agent', 'file'));
+			this.agentNames = new Set(this.getValuesInIndexFile('agents', 'agent', 'name'));
 		}
 		return this.agentNames;
 	}

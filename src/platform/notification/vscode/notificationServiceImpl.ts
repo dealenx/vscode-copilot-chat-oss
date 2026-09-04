@@ -32,6 +32,6 @@ export class NotificationService implements INotificationService {
 	}
 
 	async showQuotaExceededDialog(options: { isNoAuthUser: boolean }): Promise<unknown> {
-		return commands.executeCommand('workbench.action.chat.openQuotaExceededDialog');
+		return commands.executeCommand(options.isNoAuthUser ? 'workbench.action.chat.triggerSetup' : 'workbench.action.chat.openQuotaExceededDialog');
 	}
 }

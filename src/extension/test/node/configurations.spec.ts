@@ -99,6 +99,13 @@ describe('Configurations', () => {
 				// This setting should be internal, but can't be made TeamInternal because we lose the team and internal flags as part of its testing.
 				return;
 			}
+			if (key === ConfigKey.Advanced.CLISessionEventLoggingEnabled.fullyQualifiedId) {
+				// Test-only diagnostic toggle: enables verbose tool/permission/event
+				// logging from CopilotCLISession. Not surfaced to end users so it
+				// intentionally has no package.json entry. The smoke test enables it
+				// directly in settings.json.
+				return;
+			}
 			expect(advancedConfigurationsInPackageJson, `Advanced setting ${key} should be defined in the advanced section of package.json`).toContain(key);
 		});
 
@@ -106,6 +113,15 @@ describe('Configurations', () => {
 		configurationsInPackageJson.forEach(key => {
 			expect(registered, 'Setting in package.json is not defined in code').toContain(key);
 		});
+	});
+
+	it('prompt override string setting uses camelCase', () => {
+		const advancedSection = packageJson.contributes.configuration.find(section => section.id === 'advanced')!;
+		const promptOverrideStringKey = ConfigKey.Advanced.DebugPromptOverrideString;
+
+		expect(promptOverrideStringKey.fullyQualifiedId).toBe('github.copilot.chat.debug.promptOverrideString');
+		expect(promptOverrideStringKey.fullyQualifiedOldId).toBeUndefined();
+		expect(Object.keys(advancedSection.properties)).toContain(promptOverrideStringKey.fullyQualifiedId);
 	});
 
 	it('all localization strings in package.json are present in package.nls.json', async () => {

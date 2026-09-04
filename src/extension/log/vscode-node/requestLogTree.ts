@@ -12,8 +12,9 @@ import * as tar from 'tar';
 import * as vscode from 'vscode';
 import { IVSCodeExtensionContext } from '../../../platform/extContext/common/extensionContext';
 import { outputChannel } from '../../../platform/log/vscode/outputChannelLogTarget';
+import type { APIUsage } from '../../../platform/networking/common/openai';
 import { CapturingToken } from '../../../platform/requestLogger/common/capturingToken';
-import { ChatRequestScheme, ILoggedElementInfo, ILoggedRequestInfo, ILoggedToolCall, IRequestLogger, LoggedInfo, LoggedInfoKind, LoggedRequestKind, resolveMarkdownIcon } from '../../../platform/requestLogger/node/requestLogger';
+import { ChatRequestScheme, ILoggedElementInfo, ILoggedRequestInfo, ILoggedToolCall, IRequestLogger, LoggedInfo, LoggedInfoKind, LoggedRequestKind, resolveMarkdownIcon } from '../../../platform/requestLogger/common/requestLogger';
 import { filterMap } from '../../../util/common/arrays';
 import { assert, assertNever } from '../../../util/vs/base/common/assert';
 import { Disposable, toDisposable } from '../../../util/vs/base/common/lifecycle';
@@ -31,6 +32,17 @@ const exportPromptArchiveCommand = 'github.copilot.chat.debug.exportPromptArchiv
  * Serialize MCP server definitions to a JSON-safe format.
  * Excludes sensitive headers like Authorization.
  */
+function tokenTotal(usage: APIUsage): number {
+	return usage.total_tokens ?? (usage.prompt_tokens + usage.completion_tokens);
+}
+
+function formatTokenBreakdown(usage: APIUsage): string {
+	const fmt = (n: number) => n.toLocaleString('en-US');
+	const cached = usage.prompt_tokens_details?.cached_tokens ?? 0;
+	const input = Math.max(0, usage.prompt_tokens - cached);
+	return `input: ${fmt(input)}, cached: ${fmt(cached)}, output: ${fmt(usage.completion_tokens)}`;
+}
+
 function serializeMcpServers(servers: readonly vscode.McpServerDefinition[]): object[] {
 	return servers.map(server => {
 		if (server instanceof vscode.McpStdioServerDefinition) {
@@ -619,16 +631,12 @@ class ChatRequestProvider extends Disposable implements vscode.TreeDataProvider<
 				// whose debugName matches the token label), associate it directly with the
 				// parent ChatPromptItem — don't add it as a child. The entry stays in the
 				// request logger for virtual document serving; only tree nesting changes.
-				// Only wire the main entry if it is visible — for live NES/Ghost entries,
-				// isVisible() can be false (e.g. skipped/cancelled); wiring a hidden entry
-				// would make it visible again via the parent's icon and click command.
+				// Always wire the main entry so the parent node is clickable and shows the
+				// current icon (e.g. loading, lightbulb, skipped, circleSlash, etc.).
 				if (currReq.kind === LoggedInfoKind.Request &&
 					currReq.entry.type === LoggedRequestKind.MarkdownContentRequest &&
 					currReq.entry.debugName === currReq.token.label) {
-					const isHidden = currReq.entry.isVisible && !currReq.entry.isVisible();
-					if (!isHidden) {
-						prompt.setMainEntry(currReq);
-					}
+					prompt.setMainEntry(currReq);
 					continue;
 				}
 
@@ -702,6 +710,13 @@ class ChatPromptItem extends vscode.TreeItem {
 	}
 
 	/**
+	 * The main entry associated with this parent node. Stored so that
+	 * `withFilteredChildren` can re-resolve the icon freshly from the entry
+	 * rather than copying a potentially stale `iconPath` snapshot.
+	 */
+	private _mainEntryRef: ILoggedRequestInfo | undefined;
+
+	/**
 	 * Associate a main entry directly with this parent item.
 	 * The main entry's icon and click command are shown on the parent node.
 	 * The entry is NOT added as a child — it stays in the request logger
@@ -711,10 +726,9 @@ class ChatPromptItem extends vscode.TreeItem {
 		if (info.entry.type !== LoggedRequestKind.MarkdownContentRequest) {
 			return;
 		}
+		this._mainEntryRef = info;
 		const resolvedIcon = resolveMarkdownIcon(info.entry);
-		if (resolvedIcon !== undefined) {
-			this.iconPath = new vscode.ThemeIcon(resolvedIcon.id);
-		}
+		this.iconPath = resolvedIcon !== undefined ? new vscode.ThemeIcon(resolvedIcon.id) : undefined;
 		this.command = {
 			command: 'vscode.open',
 			title: '',
@@ -726,12 +740,45 @@ class ChatPromptItem extends vscode.TreeItem {
 		const item = new ChatPromptItem(this.token);
 		item.children = this.children.filter(filter);
 		item.id = this.id;
-		item.iconPath = this.iconPath;
-		item.command = this.command;
+		if (this._mainEntryRef) {
+			item.setMainEntry(this._mainEntryRef);
+		} else {
+			item.iconPath = this.iconPath;
+			item.command = this.command;
+		}
 		item.collapsibleState = item.children.length > 0
 			? vscode.TreeItemCollapsibleState.Expanded
 			: vscode.TreeItemCollapsibleState.None;
+		item._applyTokenSummary();
 		return item;
+	}
+
+	private _applyTokenSummary(): void {
+		let input = 0;
+		let cached = 0;
+		let output = 0;
+		let any = false;
+		for (const child of this.children) {
+			if (!(child instanceof ChatRequestItem) || child.info.entry.type !== LoggedRequestKind.ChatMLSuccess) {
+				continue;
+			}
+			const usage = child.info.entry.usage;
+			if (!usage) {
+				continue;
+			}
+			any = true;
+			const childCached = usage.prompt_tokens_details?.cached_tokens ?? 0;
+			input += Math.max(0, usage.prompt_tokens - childCached);
+			cached += childCached;
+			output += usage.completion_tokens;
+		}
+		if (!any) {
+			return;
+		}
+		const fmt = (n: number) => n.toLocaleString('en-US');
+		const total = input + cached + output;
+		this.description = `[${fmt(total)}tks]`;
+		this.tooltip = `${this.label}\n\ttotal: ${fmt(total)}tks\n\tinput: ${fmt(input)}, cached: ${fmt(cached)}, output: ${fmt(output)}`;
 	}
 
 }
@@ -788,17 +835,18 @@ class ChatRequestItem extends vscode.TreeItem {
 			const durationMs = info.entry.endTime.getTime() - info.entry.startTime.getTime();
 			const timeStr = `${durationMs.toLocaleString('en-US')}ms`;
 			const startTimeStr = info.entry.startTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-			const tokensStr = info.entry.type === LoggedRequestKind.ChatMLSuccess && info.entry.usage ? `${info.entry.usage.prompt_tokens.toLocaleString('en-US')}tks` : '';
-			const tokensStrPart = tokensStr ? `[${tokensStr}] ` : '';
-			this.description = `${tokensStrPart}[${timeStr}] [${startTimeStr}]`;
+			const usage = info.entry.type === LoggedRequestKind.ChatMLSuccess ? info.entry.usage : undefined;
+			const totalTokensStr = usage ? `${tokenTotal(usage).toLocaleString('en-US')}tks` : '';
+			const totalTokensPart = totalTokensStr ? `[${totalTokensStr}] ` : '';
+			this.description = `${totalTokensPart}[${timeStr}] [${startTimeStr}]`;
 
 			this.iconPath = info.entry.type === LoggedRequestKind.ChatMLSuccess ? undefined : new vscode.ThemeIcon('error');
 			this.tooltip = `${info.entry.type === LoggedRequestKind.ChatMLCancelation ? 'cancelled' : info.entry.result.type}
 	${info.entry.chatEndpoint.model}
 	${timeStr}
 	${startTimeStr}`;
-			if (tokensStr) {
-				this.tooltip += `\n\t${tokensStr}`;
+			if (usage) {
+				this.tooltip += `\n\ttotal: ${totalTokensStr}\n\t${formatTokenBreakdown(usage)}`;
 			}
 		}
 		this.command = {

@@ -181,6 +181,10 @@ export class ExtHostTextEditor {
 			set viewColumn(_value) {
 				throw new ReadonlyError('viewColumn');
 			},
+			// --- diff information
+			get diffInformation() {
+				return undefined;
+			},
 			// --- edit
 			edit(callback: (edit: TextEditorEdit) => void, options: { undoStopBefore: boolean; undoStopAfter: boolean } = { undoStopBefore: true, undoStopAfter: true }): Promise<boolean> {
 				throw new Error('Not implemented');

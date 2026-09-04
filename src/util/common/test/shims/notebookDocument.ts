@@ -416,6 +416,7 @@ export class ExtHostCell {
 				notebook: that.notebook.document,
 				kind: that.kind,
 				document: that.document,
+				mime: undefined,
 				get outputs() { return that._outputs.slice(0); },
 				get metadata() { return that.metadata; },
 				get executionSummary() { return that.executionSummary; }

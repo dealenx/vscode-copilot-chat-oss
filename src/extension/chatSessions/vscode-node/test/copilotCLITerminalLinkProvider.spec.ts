@@ -88,7 +88,7 @@ class MockTerminal {
 }
 
 function makeTerminal(): Terminal {
-	return new MockTerminal() as Terminal;
+	return new MockTerminal() as unknown as Terminal;
 }
 
 function makeContext(line: string, terminal: Terminal): TerminalLinkContext {

@@ -8,16 +8,16 @@ import { ICopilotTokenStore } from '../../authentication/common/copilotTokenStor
 import { ICAPIClientService } from '../../endpoint/common/capiClient';
 import { BaseGHTelemetrySender } from './ghTelemetrySender';
 import { BaseMsftTelemetrySender } from './msftTelemetrySender';
-import { ITelemetryService, TelemetryDestination, TelemetryEventMeasurements, TelemetryEventProperties } from './telemetry';
+import { ITelemetryService, TelemetryDestination, TelemetryEventMeasurements, TelemetryEventProperties, TelemetryTrustedValue } from './telemetry';
 
 export class BaseTelemetryService implements ITelemetryService {
 	declare readonly _serviceBrand: undefined;
 	// Properties that are applied to all telemetry events (currently only used by the exp service
 	// TODO @lramos15 extend further to include more
-	private _sharedProperties: Record<string, string> = {};
+	private _sharedProperties: Record<string, string | TelemetryTrustedValue<string>> = {};
 	private _originalExpAssignments: string | undefined;
 	private _additionalExpAssignments: string[] = [];
-	private _disposables: IDisposable[] = [];
+	protected _disposables: IDisposable[] = [];
 	constructor(
 		protected readonly _tokenStore: ICopilotTokenStore,
 		private readonly _capiClientService: ICAPIClientService,
@@ -82,17 +82,22 @@ export class BaseTelemetryService implements ITelemetryService {
 	}
 
 	sendEnhancedGHTelemetryEvent(eventName: string, properties?: TelemetryEventProperties | undefined, measurements?: TelemetryEventMeasurements | undefined): void {
-		properties = { ...properties, ...this._sharedProperties };
+		properties = this._addSku({ ...properties, ...this._sharedProperties });
 		this._ghTelemetrySender.sendEnhancedTelemetryEvent(eventName, properties, measurements);
 	}
 	sendEnhancedGHTelemetryErrorEvent(eventName: string, properties?: TelemetryEventProperties | undefined, measurements?: TelemetryEventMeasurements | undefined): void {
-		properties = { ...properties, ...this._sharedProperties };
+		properties = this._addSku({ ...properties, ...this._sharedProperties });
 		this._ghTelemetrySender.sendEnhancedTelemetryErrorEvent(eventName, properties, measurements);
 	}
 
 	sendInternalMSFTTelemetryEvent(eventName: string, properties?: TelemetryEventProperties | undefined, measurements?: TelemetryEventMeasurements | undefined): void {
 		properties = { ...properties, ...this._sharedProperties };
 		this._microsoftTelemetrySender.sendInternalTelemetryEvent(eventName, properties, measurements);
+	}
+
+	private _addSku(properties: TelemetryEventProperties): TelemetryEventProperties {
+		const sku = this._tokenStore.copilotToken?.sku;
+		return sku ? { ...properties, sku } : properties;
 	}
 
 	private _getEventName(eventName: string, github: boolean | { eventNamePrefix: string }): string {
@@ -143,9 +148,10 @@ export class BaseTelemetryService implements ITelemetryService {
 			}
 		}
 		this._capiClientService.abExpContext = value;
-		this._sharedProperties['abexp.assignmentcontext'] = value;
+		this._sharedProperties['abexp.assignmentcontext'] = new TelemetryTrustedValue(value);
 	}
 
+	// __GDPR__COMMON__ "capi.assignmentcontext" : { "classification": "SystemMetaData", "purpose": "FeatureInsight" }
 	setSharedProperty(name: string, value: string): void {
 		/* __GDPR__
 			"query-expfeature" : {
@@ -157,6 +163,27 @@ export class BaseTelemetryService implements ITelemetryService {
 				"errortype": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth"}
 			}
 		*/
+		/* __GDPR__
+			"assignments-validation" : {
+				"FeatureVariableCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight" },
+				"AssignedVariantCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight" },
+				"DataVersion": { "classification": "SystemMetaData", "purpose": "FeatureInsight" },
+				"AssignmentContext": { "classification": "SystemMetaData", "purpose": "FeatureInsight" }
+			}
+		*/
+		/* __GDPR__
+			"call-assignments-error" : {
+				"ErrorType": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth"}
+			}
+		*/
+		/* __GDPR__
+			"tas-call" : {
+				"callType": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth" },
+				"outcome": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth" },
+				"extensionName": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth" },
+				"assignmentContext": { "classification": "SystemMetaData", "purpose": "FeatureInsight" }
+			}
+		*/
 		if (name === 'abexp.assignmentcontext') {
 			this._setOriginalExpAssignments(value);
 			return;
@@ -165,9 +192,11 @@ export class BaseTelemetryService implements ITelemetryService {
 	}
 
 	postEvent(eventName: string, props: Map<string, string>): void {
-		for (const [key, value] of Object.entries(this._sharedProperties)) {
-			props.set(key, value);
-		}
-		this._microsoftTelemetrySender.postEvent(eventName, props);
+		const properties: Record<string, string | TelemetryTrustedValue<string>> = {
+			...Object.fromEntries(props),
+			...this._sharedProperties
+		};
+		this._microsoftTelemetrySender.sendInternalTelemetryEvent(eventName, properties);
+		this._microsoftTelemetrySender.sendTelemetryEvent(eventName, properties);
 	}
 }
