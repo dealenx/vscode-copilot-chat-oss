@@ -9,6 +9,39 @@ GitHub Copilot agents handle complete coding tasks end-to-end, autonomously plan
 ![Working with GitHub Copilot agent mode to make edits to code in your workspace](https://github.com/microsoft/vscode-docs/raw/732b9599e49ee7034744a3e5b0485b7fb4bdf530/docs/copilot/images/getting-started/custom-reviewer-mode.png)
 
 
+## No-Auth Build (dealenx/vscode-copilot-chat-oss)
+
+This is an OSS fork of [microsoft/vscode-copilot-chat](https://github.com/microsoft/vscode-copilot-chat) with **GitHub authentication removed**. The extension activates without a GitHub Copilot subscription: chat is driven by BYOK models (Ollama, Anthropic, OpenAI, etc.), and the upstream `NoAuthAuthenticationService` bypasses the Copilot token flow.
+
+### Install from VSIX
+
+```powershell
+# VSCodium portable example:
+# <VSCodium>\bin\codium-insiders.cmd --install-extension copilot-chat-0.63.0-oss.1.vsix
+```
+
+### Important: VSCodium "built-in extension" conflict
+
+Some VSCodium-insiders builds ship a `product.json` with:
+
+```json
+"builtInExtensionsEnabledWithAutoUpdates": ["GitHub.copilot-chat"]
+```
+
+VS Code treats every ID in this list as a **built-in, product-shipped extension**. The extension scanner applies the rule "this ID is already part of the product → ignore the user-installed copy". Consequence: the VSIX extracts fine into `data/extensions`, but on every scan the installed copy is silently dropped from the extension list, and both the CLI and the UI fail with:
+
+```
+ScanningExtension: Cannot read the extension from <extension-folder>
+```
+
+**Fix:** remove `"GitHub.copilot-chat"` from that list in `<VSCodium>\resources\app\product.json`:
+
+```json
+"builtInExtensionsEnabledWithAutoUpdates": []
+```
+
+Note that this patch lives inside the VSCodium folder and is lost when VSCodium is updated or reinstalled — re-apply it after an update if the extension stops loading. Alternatively, rename the extension identity in this repo's `package.json` (e.g. publisher `dealenx`) so the ID can never collide with the built-in allowlist, then rebuild the VSIX.
+
 ## Getting access to GitHub Copilot
 
 Sign up for [GitHub Copilot Free](https://github.com/settings/copilot?utm_source=vscode-chat-readme&utm_medium=second&utm_campaign=2025mar-em-MSFT-signup), or request access from your enterprise admin.
